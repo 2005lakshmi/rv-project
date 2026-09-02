@@ -1,103 +1,27 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 
-const GOOGLE_MAPS_API_KEY = 'AIzaSyBS7XTc0VO9OQezSt6c6sHUDIRANBfuZf0';
-const GOOGLE_MAPS_SCRIPT_ID = 'google-maps-js-sdk';
+const OSM_TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
 
-function loadGoogleMapsScript() {
-  if (window.google?.maps) {
-    return Promise.resolve(window.google.maps);
-  }
-
-  const existingScript = document.getElementById(GOOGLE_MAPS_SCRIPT_ID);
-  if (existingScript) {
-    return new Promise((resolve, reject) => {
-      existingScript.addEventListener('load', () => resolve(window.google.maps), { once: true });
-      existingScript.addEventListener('error', () => reject(new Error('Failed to load Google Maps script')), { once: true });
-    });
-  }
-
-  return new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.id = GOOGLE_MAPS_SCRIPT_ID;
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}`;
-    script.async = true;
-    script.defer = true;
-    script.onload = () => {
-      if (window.google?.maps) {
-        resolve(window.google.maps);
-      } else {
-        reject(new Error('Google Maps loaded, but maps API is unavailable'));
-      }
-    };
-    script.onerror = () => reject(new Error('Failed to load Google Maps script'));
-    document.head.appendChild(script);
-  });
-}
-
-export default function DriverRouteMap({ origin, destination, routeLabel }) {
+export default function DriverRouteMap({ apiBase, origin, destination, routeLabel }) {
   const mapElementRef = useRef(null);
   const mapInstanceRef = useRef(null);
-  const directionsRendererRef = useRef(null);
   const originMarkerRef = useRef(null);
   const destinationMarkerRef = useRef(null);
   const routeLineRef = useRef(null);
   const [error, setError] = useState('');
 
+  const navigationUrl = useMemo(() => {
+    if (!origin || !destination) {
+      return '';
+    }
+
+    return `https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${origin.lat}%2C${origin.lon}%3B${destination.lat}%2C${destination.lon}`;
+  }, [origin, destination]);
+
   useEffect(() => {
     let cancelled = false;
-
-    function clearFallbackOverlay() {
-      if (originMarkerRef.current) {
-        originMarkerRef.current.setMap(null);
-        originMarkerRef.current = null;
-      }
-      if (destinationMarkerRef.current) {
-        destinationMarkerRef.current.setMap(null);
-        destinationMarkerRef.current = null;
-      }
-      if (routeLineRef.current) {
-        routeLineRef.current.setMap(null);
-        routeLineRef.current = null;
-      }
-    }
-
-    function drawFallbackRoute() {
-      if (!mapInstanceRef.current || !window.google?.maps) {
-        return;
-      }
-
-      clearFallbackOverlay();
-
-      const google = window.google;
-      const originPoint = { lat: origin.lat, lng: origin.lon };
-      const destinationPoint = { lat: destination.lat, lng: destination.lon };
-      const bounds = new google.maps.LatLngBounds();
-
-      originMarkerRef.current = new google.maps.Marker({
-        map: mapInstanceRef.current,
-        position: originPoint,
-        title: 'Warehouse'
-      });
-
-      destinationMarkerRef.current = new google.maps.Marker({
-        map: mapInstanceRef.current,
-        position: destinationPoint,
-        title: 'Customer'
-      });
-
-      routeLineRef.current = new google.maps.Polyline({
-        map: mapInstanceRef.current,
-        path: [originPoint, destinationPoint],
-        geodesic: true,
-        strokeColor: '#0066cc',
-        strokeOpacity: 0.9,
-        strokeWeight: 5
-      });
-
-      bounds.extend(originPoint);
-      bounds.extend(destinationPoint);
-      mapInstanceRef.current.fitBounds(bounds, 60);
-    }
 
     async function renderRoute() {
       if (!origin || !destination || !mapElementRef.current) {
@@ -106,70 +30,59 @@ export default function DriverRouteMap({ origin, destination, routeLabel }) {
 
       try {
         setError('');
-        await loadGoogleMapsScript();
 
-        if (cancelled || !window.google?.maps) {
-          return;
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.remove();
+          mapInstanceRef.current = null;
         }
 
-        if (!mapInstanceRef.current) {
-          mapInstanceRef.current = new window.google.maps.Map(mapElementRef.current, {
-            center: { lat: origin.lat, lng: origin.lon },
-            zoom: 9,
-            mapTypeControl: true,
-            streetViewControl: false,
-            fullscreenControl: true
-          });
-        }
+        const map = L.map(mapElementRef.current).setView([origin.lat, origin.lon], 10);
+        mapInstanceRef.current = map;
 
-        if (!directionsRendererRef.current) {
-          directionsRendererRef.current = new window.google.maps.DirectionsRenderer({
-            map: mapInstanceRef.current,
-            suppressMarkers: false,
-            polylineOptions: {
-              strokeColor: '#0066cc',
-              strokeWeight: 6
-            }
-          });
-        }
+        L.tileLayer(OSM_TILE_URL, {
+          attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
 
-        const directionsService = new window.google.maps.DirectionsService();
-        directionsService.route(
-          {
-            origin: { lat: origin.lat, lng: origin.lon },
-            destination: { lat: destination.lat, lng: destination.lon },
-            travelMode: window.google.maps.TravelMode.DRIVING,
-            provideRouteAlternatives: false
-          },
-          (result, status) => {
-            if (cancelled) {
-              return;
-            }
+        const originString = `${origin.lat},${origin.lon}`;
+        const destinationString = `${destination.lat},${destination.lon}`;
 
-            if (status === 'OK' && result) {
-              clearFallbackOverlay();
-              directionsRendererRef.current.setDirections(result);
-            } else {
-              directionsRendererRef.current.setDirections({ routes: [] });
-              drawFallbackRoute();
-              setError(
-                `Directions API is unavailable (${status}). Showing a direct warehouse-to-customer route instead.`
-              );
+        let routeCoordinates = [
+          [origin.lat, origin.lon],
+          [destination.lat, destination.lon]
+        ];
+
+        if (apiBase) {
+          try {
+            const routeRes = await fetch(`${apiBase}/maps/route?origin=${encodeURIComponent(originString)}&destination=${encodeURIComponent(destinationString)}&mode=driving`);
+            const routeData = await routeRes.json();
+
+            if (routeRes.ok && routeData?.geometry?.coordinates?.length) {
+              routeCoordinates = routeData.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
             }
+          } catch (routeErr) {
+            console.warn('OSRM fetch failed, falling back to straight line route', routeErr);
           }
-        );
+        }
+
+        const polyline = L.polyline(routeCoordinates, {
+          color: '#0066cc',
+          weight: 6,
+          opacity: 0.9
+        }).addTo(map);
+        routeLineRef.current = polyline;
+
+        const bounds = L.latLngBounds(routeCoordinates);
+        map.fitBounds(bounds, { padding: [24, 24] });
+
+        originMarkerRef.current = L.marker([origin.lat, origin.lon]).addTo(map);
+        destinationMarkerRef.current = L.marker([destination.lat, destination.lon]).addTo(map);
+
+        originMarkerRef.current.bindPopup('Warehouse');
+        destinationMarkerRef.current.bindPopup('Customer');
       } catch (err) {
         console.error('Error rendering driver route map:', err);
         if (!cancelled) {
-          if (window.google?.maps) {
-            if (directionsRendererRef.current) {
-              directionsRendererRef.current.setDirections({ routes: [] });
-            }
-            drawFallbackRoute();
-            setError('Google directions are unavailable right now. Showing a direct warehouse-to-customer route.');
-          } else {
-            setError(err.message || 'Unable to render route on map');
-          }
+          setError(err.message || 'Unable to render route on map');
         }
       }
     }
@@ -178,14 +91,40 @@ export default function DriverRouteMap({ origin, destination, routeLabel }) {
 
     return () => {
       cancelled = true;
-      clearFallbackOverlay();
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+      }
+      if (routeLineRef.current) {
+        routeLineRef.current.remove();
+        routeLineRef.current = null;
+      }
+      if (originMarkerRef.current) {
+        originMarkerRef.current.remove();
+        originMarkerRef.current = null;
+      }
+      if (destinationMarkerRef.current) {
+        destinationMarkerRef.current.remove();
+        destinationMarkerRef.current = null;
+      }
     };
-  }, [origin, destination]);
+  }, [apiBase, origin, destination]);
 
   return (
     <div className="card" style={{ marginTop: '16px', padding: 0, overflow: 'hidden' }}>
       <div style={{ padding: '16px 16px 0' }}>
-        <h3>{routeLabel || 'Live Delivery Route'}</h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <h3 style={{ margin: 0 }}>{routeLabel || 'Live Delivery Route'}</h3>
+          {navigationUrl && (
+            <button
+              className="btn btn-primary btn-small"
+              onClick={() => window.open(navigationUrl, '_blank', 'noopener,noreferrer')}
+              style={{ whiteSpace: 'nowrap' }}
+            >
+              Start Navigation
+            </button>
+          )}
+        </div>
         {error && <p style={{ color: '#ff6b6b', marginTop: '8px' }}>{error}</p>}
       </div>
       <div

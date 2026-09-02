@@ -6,13 +6,22 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const config = require('./config');
 const { connectDB, initializeCollections, disconnectDB } = require('./db/mongoConnection');
-const { getDataManager } = require('./modules/mongoDataManager');
+const { getDataManager: getMongoDataManager } = require('./modules/mongoDataManager');
+const { getLocalDataManager } = require('./modules/localDataManager');
 const { buildDistanceMatrix } = require('./utils/distance');
 const KPITracker = require('./modules/kpiTracker');
 const GeminiAI = require('./modules/geminiAI');
 
 // Initialize app
 const app = express();
+let dataManager = null;
+
+function getDataManager() {
+  if (!dataManager) {
+    dataManager = config.useMockData ? getLocalDataManager() : getMongoDataManager();
+  }
+  return dataManager;
+}
 
 // Middleware
 app.use(cors());
@@ -25,6 +34,9 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use('/api/auth', require('./src/routes/authRoutes'));
+app.use('/api/admin', require('./src/routes/adminRoutes'));
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({
@@ -32,8 +44,75 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     environment: config.env,
-    database: 'mongodb'
+    database: config.useMockData ? 'local-mock' : 'mongodb'
   });
+});
+
+app.get('/api/maps/route', async (req, res) => {
+  try {
+    const { origin, destination, mode = 'driving' } = req.query;
+
+    if (!origin || !destination) {
+      return res.status(400).json({
+        error: 'origin and destination query parameters are required'
+      });
+    }
+
+    const parseCoordinate = (value) => {
+      const parts = String(value).split(',').map((item) => Number(item.trim()));
+      if (parts.length !== 2 || parts.some(Number.isNaN)) {
+        return null;
+      }
+      const [lat, lon] = parts;
+      return { lat, lon };
+    };
+
+    const originCoords = parseCoordinate(origin);
+    const destinationCoords = parseCoordinate(destination);
+
+    if (!originCoords || !destinationCoords) {
+      return res.status(400).json({
+        error: 'origin and destination must be in latitude,longitude format'
+      });
+    }
+
+    const osrmUrl = new URL('https://router.project-osrm.org/route/v1/driving/' +
+      `${originCoords.lon},${originCoords.lat};${destinationCoords.lon},${destinationCoords.lat}`);
+    osrmUrl.searchParams.set('overview', 'full');
+    osrmUrl.searchParams.set('geometries', 'geojson');
+
+    const response = await fetch(osrmUrl.toString());
+    const data = await response.json();
+
+    if (!response.ok || data.code !== 'Ok') {
+      return res.status(502).json({
+        error: 'OSRM route request failed',
+        details: data.message || data.code || 'Unknown error'
+      });
+    }
+
+    const route = data.routes?.[0];
+    if (!route) {
+      return res.status(404).json({ error: 'No route found between origin and destination' });
+    }
+
+    res.json({
+      status: 'ok',
+      provider: 'openstreetmap-osrm',
+      origin: String(origin),
+      destination: String(destination),
+      mode: String(mode),
+      summary: route.summary || 'Route found',
+      distance: route.distance ?? null,
+      duration: route.duration ?? null,
+      geometry: route.geometry || null,
+      legs: route.legs || [],
+      raw: data
+    });
+  } catch (error) {
+    console.error('OSRM route error:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // ============ WAREHOUSE ENDPOINTS ============
@@ -146,13 +225,32 @@ async function startServer() {
     console.log('║      Starting with MongoDB...                             ║');
     console.log('╚════════════════════════════════════════════════════════════╝\n');
 
-    // Connect to MongoDB
-    console.log('🔌 Connecting to MongoDB...');
-    await connectDB();
+    // Connect to MongoDB only when mock data is disabled
+    if (!config.useMockData) {
+      console.log('🔌 Connecting to MongoDB...');
+      await connectDB();
 
-    // Initialize collections and indexes
-    console.log('📚 Initializing collections and indexes...');
-    await initializeCollections();
+      console.log('📚 Initializing collections and indexes...');
+      await initializeCollections();
+
+      try {
+        const { createUser } = require('./src/services/authService');
+        await createUser({
+          name: 'System Admin',
+          email: 'admin@logistics.com',
+          password: 'Admin@1234',
+          role: 'ADMIN',
+          status: 'ACTIVE'
+        });
+        console.log('✅ Default admin account created: admin@logistics.com / Admin@1234');
+      } catch (error) {
+        if (!String(error.message).toLowerCase().includes('already exists')) {
+          console.warn('Admin seed warning:', error.message);
+        }
+      }
+    } else {
+      console.log('🧪 Using mock data - skipping MongoDB connection');
+    }
 
     // Initialize data manager
     console.log('📥 Initializing data manager...');
@@ -171,6 +269,11 @@ async function startServer() {
       const disruptionRoutes = require('./routes/disruption');
       const driverRoutes = require('./routes/driver');
       const dashboardRoutes = require('./routes/dashboard');
+      const productRoutes = require('./routes/products');
+      const supplierRoutes = require('./routes/suppliers');
+      const warehouseRoutes = require('./routes/warehouses');
+      const inventoryRoutes = require('./routes/inventory');
+      const transferRoutes = require('./routes/transfers');
 
       const kpiTracker = new KPITracker();
       const geminiAI = new GeminiAI({
@@ -188,6 +291,11 @@ async function startServer() {
       app.use('/api/disruption', disruptionRoutes(dataManager, kpiTracker, distanceMatrix, config, geminiAI));
       app.use('/api/driver', driverRoutes(dataManager, geminiAI));
       app.use('/api/dashboard', dashboardRoutes(dataManager, kpiTracker, distanceMatrix, config));
+      app.use('/api/products', productRoutes(dataManager));
+      app.use('/api/suppliers', supplierRoutes(dataManager));
+      app.use('/api/warehouses', warehouseRoutes(dataManager));
+      app.use('/api/inventory', inventoryRoutes(dataManager));
+      app.use('/api/transfers', transferRoutes(dataManager));
       
       // Initialize Gemini AI and add AI routes
       const aiRoutes = require('./routes/ai');
@@ -266,7 +374,9 @@ async function startServer() {
     process.on('SIGTERM', async () => {
       console.log('\n🛑 Shutting down gracefully...');
       server.close(async () => {
-        await disconnectDB();
+        if (!config.useMockData) {
+          await disconnectDB();
+        }
         process.exit(0);
       });
     });
@@ -274,7 +384,9 @@ async function startServer() {
     process.on('SIGINT', async () => {
       console.log('\n🛑 Shutting down gracefully...');
       server.close(async () => {
-        await disconnectDB();
+        if (!config.useMockData) {
+          await disconnectDB();
+        }
         process.exit(0);
       });
     });

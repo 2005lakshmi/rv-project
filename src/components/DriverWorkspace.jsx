@@ -8,6 +8,7 @@ export default function DriverWorkspace({ apiBase, driver, onLogout }) {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [activeRoute, setActiveRoute] = useState(null);
+  const [selectedAlternativeId, setSelectedAlternativeId] = useState('');
   const [issueByOrder, setIssueByOrder] = useState({});
 
   useEffect(() => {
@@ -57,6 +58,7 @@ export default function DriverWorkspace({ apiBase, driver, onLogout }) {
         ...data,
         orderDetails: warehouseOrders.find((order) => order.id === orderId) || null
       });
+      setSelectedAlternativeId(data.routeRecommendation?.id || '');
       setMessage(`Delivery started for ${orderId}. In-app navigation is now guiding the driver to the customer location.`);
       fetchOrders();
     } catch (error) {
@@ -83,24 +85,54 @@ export default function DriverWorkspace({ apiBase, driver, onLogout }) {
         throw new Error(data.error || 'Unable to find an alternative route');
       }
 
+      const selectedOrder = warehouseOrders.find((order) => order.id === orderId) || null;
+      const alternativeRoutes = data.alternativeRoutes || data.analysis?.alternativeRoutes || [];
+      const recommended = data.analysis?.recommendedRoute || alternativeRoutes[0] || null;
+
       setActiveRoute({
         orderId,
-        googleMapsUrl: data.analysis?.recommendedRoute?.googleMapsUrl,
-        embedMapUrl: data.analysis?.recommendedRoute?.embedMapUrl,
-        routeRecommendation: data.analysis?.recommendedRoute,
-        alternativeRoutes: data.alternativeRoutes,
+        googleMapsUrl: recommended?.googleMapsUrl,
+        embedMapUrl: recommended?.embedMapUrl,
+        routeRecommendation: recommended,
+        alternativeRoutes,
         aiGuidance: data.analysis?.aiPrediction,
         analysis: data.analysis,
-        origin: warehouseOrders.find((order) => order.id === orderId)?.route?.origin || null,
-        destination: warehouseOrders.find((order) => order.id === orderId)?.customerLocation || null,
+        origin: selectedOrder?.route?.origin || null,
+        destination: selectedOrder?.customerLocation || null,
         customerLocationName:
-          warehouseOrders.find((order) => order.id === orderId)?.customerLocationName || 'Customer destination',
-        orderDetails: warehouseOrders.find((order) => order.id === orderId) || null
+          selectedOrder?.customerLocationName || 'Customer destination',
+        orderDetails: selectedOrder
       });
+      setSelectedAlternativeId(recommended?.id || '');
       setMessage(`Alternative route generated for ${orderId} because of ${reason.toLowerCase()}.`);
     } catch (error) {
       console.error('Alternative route error:', error);
       setMessage(error.message || 'Unable to find an alternative route');
+    }
+  };
+
+  const handleDeliveryComplete = async (orderId) => {
+    try {
+      const res = await fetch(`${apiBase}/driver/deliver`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId,
+          driverId: driver.id
+        })
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Unable to complete delivery');
+      }
+
+      setMessage(`Order ${orderId} has been marked as delivered.`);
+      setActiveRoute(null);
+      await fetchOrders();
+    } catch (error) {
+      console.error('Delivery completion error:', error);
+      setMessage(error.message || 'Unable to complete delivery');
     }
   };
 
@@ -194,9 +226,13 @@ export default function DriverWorkspace({ apiBase, driver, onLogout }) {
                         <span className={`badge badge-${getDriverStatusColor(order.status)}`}>{order.status}</span>
                       </td>
                       <td>
-                        <button className="btn btn-primary btn-small" onClick={() => handleDispatch(order.id)}>
-                          Out for Delivery
-                        </button>
+                        {order.status === 'delivered' ? (
+                          <span className="badge badge-success">Delivered</span>
+                        ) : (
+                          <button className="btn btn-primary btn-small" onClick={() => handleDispatch(order.id)}>
+                            Out for Delivery
+                          </button>
+                        )}
                       </td>
                       <td>
                         <select
@@ -239,6 +275,13 @@ export default function DriverWorkspace({ apiBase, driver, onLogout }) {
                     {activeRoute.routeRecommendation?.deliveryHours} hrs
                   </p>
                   <p style={{ color: '#888' }}>{activeRoute.routeRecommendation?.reason}</p>
+                  <button
+                    className="btn btn-primary btn-small"
+                    onClick={() => handleDeliveryComplete(activeRoute.orderId)}
+                    style={{ marginTop: '12px' }}
+                  >
+                    Mark as Delivered
+                  </button>
                 </div>
                 <div style={{ padding: '16px', background: '#1a1a1a', borderRadius: '6px' }}>
                   <p><strong>AI Route Guidance</strong></p>
@@ -256,6 +299,7 @@ export default function DriverWorkspace({ apiBase, driver, onLogout }) {
 
               {activeRoute.origin && activeRoute.destination && (
                 <DriverRouteMap
+                  apiBase={apiBase}
                   origin={activeRoute.origin}
                   destination={activeRoute.destination}
                   routeLabel={`${driver.warehouseName} to ${activeRoute.customerLocationName || 'customer'}`}
@@ -265,23 +309,56 @@ export default function DriverWorkspace({ apiBase, driver, onLogout }) {
               {activeRoute.alternativeRoutes?.length > 0 && (
                 <div style={{ marginTop: '16px' }}>
                   <h3 style={{ marginBottom: '12px' }}>Alternative Routes</h3>
-                  {activeRoute.alternativeRoutes.map((route) => (
-                    <div
-                      key={route.id}
-                      style={{
-                        padding: '12px',
-                        marginBottom: '10px',
-                        background: '#1a1a1a',
-                        borderRadius: '6px',
-                        borderLeft: '4px solid #0066cc'
-                      }}
-                    >
-                      <strong>{route.label}</strong>
-                      <p>
-                        {route.distance} km | {route.deliveryHours} hrs | ${route.cost}
-                      </p>
-                    </div>
-                  ))}
+                  {activeRoute.alternativeRoutes.map((route) => {
+                    const isSelected = selectedAlternativeId === route.id || (!selectedAlternativeId && route.id === activeRoute.routeRecommendation?.id);
+                    return (
+                      <div
+                        key={route.id}
+                        style={{
+                          padding: '12px',
+                          marginBottom: '10px',
+                          background: isSelected ? '#18324d' : '#1a1a1a',
+                          borderRadius: '6px',
+                          borderLeft: isSelected ? '4px solid #4ecdc4' : '4px solid #0066cc',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: '12px',
+                          flexWrap: 'wrap'
+                        }}
+                      >
+                        <div>
+                          <strong>{route.label}</strong>
+                          <p style={{ margin: '6px 0 0' }}>
+                            {route.distance} km | {route.deliveryHours} hrs | ${route.cost}
+                          </p>
+                          <p style={{ margin: '4px 0 0', color: '#b8c4d9' }}>{route.reason}</p>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                          <button
+                            className="btn btn-secondary btn-small"
+                            onClick={() => {
+                              setSelectedAlternativeId(route.id);
+                              setActiveRoute((prev) => ({
+                                ...prev,
+                                routeRecommendation: route
+                              }));
+                            }}
+                          >
+                            {isSelected ? 'Selected' : 'Use This Route'}
+                          </button>
+                          {route.googleMapsUrl && (
+                            <button
+                              className="btn btn-primary btn-small"
+                              onClick={() => window.open(route.googleMapsUrl, '_blank', 'noopener,noreferrer')}
+                            >
+                              Navigate
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

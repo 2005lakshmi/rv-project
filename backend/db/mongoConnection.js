@@ -5,7 +5,7 @@ const { MongoClient } = require('mongodb');
 
 // Connection configuration following best practices for demo/hackathon environments
 const mongoConfig = {
-  url: process.env.MONGODB_URL || 'mongodb+srv://kiranhkkiranhk60_db_user:kiranhk%40123@cluster0.3lmsm1a.mongodb.net/logistics_optimization',
+  url: process.env.MONGODB_URL || 'mongodb://localhost:27017',
   dbName: process.env.DB_NAME || 'logistics_optimization',
   
   // Connection pool optimized for development (small pool, quick responses)
@@ -105,7 +105,10 @@ async function initializeCollections() {
       'warehouses',
       'customers',
       'demandHistory',
-      'ordersHistory'
+      'ordersHistory',
+      'products',
+      'suppliers'
+      , 'inventory', 'inventoryTransactions', 'transfers'
     ];
 
     for (const collName of collectionsToReset) {
@@ -122,6 +125,11 @@ async function initializeCollections() {
       'warehouses',
       'customers',
       'orders',
+      'products',
+      'suppliers',
+      'inventory',
+      'inventoryTransactions',
+      'transfers',
       'demandHistory',
       'ordersHistory'
     ];
@@ -159,6 +167,30 @@ async function initializeCollections() {
         { status: 1 },
         { requiredDate: 1 }
       ],
+        products: [
+          { id: 1 },
+          { sku: 1 }
+        ],
+        suppliers: [
+          { id: 1 },
+          { email: 1 }
+        ],
+        inventory: [
+          { id: 1 },
+          { productId: 1 },
+          { warehouseId: 1 }
+        ],
+        inventoryTransactions: [
+          { id: 1 },
+          { inventoryId: 1 },
+          { type: 1 }
+        ],
+        transfers: [
+          { id: 1 },
+          { sourceWarehouseId: 1 },
+          { destinationWarehouseId: 1 },
+          { status: 1 }
+        ],
       demandHistory: [
         { customerId: 1, date: 1 },
         { productId: 1, date: 1 }
@@ -174,7 +206,11 @@ async function initializeCollections() {
       const coll = database.collection(collName);
       for (const indexSpec of indexes) {
         try {
-          await coll.createIndex(indexSpec);
+          // Make sku, supplier email, and warehouse code unique when creating indexes
+          const keys = Object.keys(indexSpec || {});
+          const shouldUnique = keys.includes('sku') || keys.includes('email') || keys.includes('code');
+          const options = shouldUnique ? { unique: true } : {};
+          await coll.createIndex(indexSpec, options);
         } catch (err) {
           // Index might already exist
         }

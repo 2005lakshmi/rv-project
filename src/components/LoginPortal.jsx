@@ -22,7 +22,7 @@ export default function LoginPortal({ onAdminLogin, onDriverLogin }) {
             Minimal authentication is enabled here. Continue directly to the admin dashboard and navbar.
           </p>
           <button className="btn btn-primary" onClick={onAdminLogin}>
-            Continue as Admin
+            Continue to Admin Login
           </button>
         </div>
 

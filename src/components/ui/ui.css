@@ -1,0 +1,60 @@
+/* Reusable UI primitives for the admin shell */
+
+:root {
+  --sidebar-width: 260px;
+  --sidebar-bg: #0f1724;
+  --sidebar-text: #d1d5db;
+  --nav-bg: white;
+}
+
+/* Sidebar */
+.ui-sidebar {
+  width: var(--sidebar-width);
+  background: linear-gradient(180deg, #071024 0%, #0f1724 100%);
+  color: var(--sidebar-text);
+  min-height: calc(100vh - 64px);
+  padding: 18px 12px;
+  box-shadow: 0 2px 12px rgba(2,6,23,0.5);
+}
+.ui-sidebar .brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 6px;
+  margin-bottom: 18px;
+}
+.ui-sidebar .brand h2 {
+  font-size: 16px;
+  color: #fff;
+  letter-spacing: -0.2px;
+}
+.ui-nav-list { list-style:none; padding:0; margin: 8px 0; display:flex; flex-direction:column; gap:6px }
+.ui-nav-item { padding: 10px 12px; border-radius:8px; color: var(--sidebar-text); cursor:pointer; display:flex; align-items:center; gap:10px; font-weight:600 }
+.ui-nav-item:hover { background: rgba(255,255,255,0.03); color: #fff }
+.ui-nav-item.active { background: rgba(255,255,255,0.06); color: #fff }
+
+/* Top Navbar */
+.ui-topnav { height:64px; display:flex; align-items:center; gap:12px; padding:0 20px; background: linear-gradient(135deg,#fff 0%, #f7fbff 100%); border-bottom:1px solid #e6eefc }
+.ui-topnav .left { flex:1; display:flex; gap:12px; align-items:center }
+.ui-topnav .right { display:flex; gap:8px; align-items:center }
+.ui-topnav .search { min-width:320px; max-width:600px; display:flex; align-items:center; gap:8px }
+.ui-topnav .search input { width:100%; padding:8px 12px; border-radius:10px; border:1px solid #e6eefc }
+
+/* Modal / Confirmation */
+.ui-modal-backdrop { position:fixed; inset:0; background:rgba(2,6,23,0.45); display:flex; align-items:center; justify-content:center; z-index:1200 }
+.ui-modal { width:min(560px,95vw); background:var(--card-bg); border-radius:12px; padding:20px; box-shadow:var(--shadow-lg) }
+.ui-modal .modal-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:16px }
+
+/* Toasts */
+.ui-toast-container { position:fixed; right:18px; bottom:18px; display:flex; flex-direction:column; gap:10px; z-index:1300 }
+.ui-toast { background:var(--card-bg); border:1px solid var(--border-color); padding:10px 14px; border-radius:10px; box-shadow:var(--shadow); min-width:240px }
+
+/* Pagination */
+.ui-pagination { display:flex; gap:8px; align-items:center; justify-content:center; padding:12px }
+.ui-page { padding:8px 10px; border-radius:8px; cursor:pointer; border:1px solid var(--border-color); background:var(--card-bg) }
+.ui-page.active { background:var(--primary-color); color:white; border-color:var(--primary-color) }
+
+@media (max-width: 900px) {
+  .ui-sidebar { display:none }
+  .ui-topnav .search { min-width:160px }
+}

@@ -143,5 +143,35 @@ module.exports = (dataManager, geminiAI) => {
     }
   });
 
+  router.post('/deliver', async (req, res) => {
+    try {
+      const { orderId, driverId } = req.body;
+      const order = await dataManager.getOrder(orderId);
+
+      if (!order) {
+        return res.status(404).json({ error: 'Order not found' });
+      }
+
+      await dataManager.updateOrderStatus(order.id, 'delivered', {
+        deliveredAt: new Date().toISOString(),
+        driverAssignment: {
+          ...(order.driverAssignment || {}),
+          driverId: driverId || order.driverAssignment?.driverId,
+          deliveredAt: new Date().toISOString()
+        }
+      });
+
+      res.json({
+        success: true,
+        orderId: order.id,
+        status: 'delivered',
+        deliveredAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Driver delivery completion error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   return router;
 };

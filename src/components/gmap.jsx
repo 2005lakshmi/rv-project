@@ -1,38 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 
-const GOOGLE_MAPS_API_KEY = 'AIzaSyBS7XTc0VO9OQezSt6c6sHUDIRANBfuZf0';
-const GOOGLE_MAPS_SCRIPT_ID = 'google-maps-js-sdk';
-
-function loadGoogleMapsScript() {
-  if (window.google?.maps) {
-    return Promise.resolve(window.google.maps);
-  }
-
-  const existingScript = document.getElementById(GOOGLE_MAPS_SCRIPT_ID);
-  if (existingScript) {
-    return new Promise((resolve, reject) => {
-      existingScript.addEventListener('load', () => resolve(window.google.maps), { once: true });
-      existingScript.addEventListener('error', () => reject(new Error('Failed to load Google Maps script')), { once: true });
-    });
-  }
-
-  return new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.id = GOOGLE_MAPS_SCRIPT_ID;
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}`;
-    script.async = true;
-    script.defer = true;
-    script.onload = () => {
-      if (window.google?.maps) {
-        resolve(window.google.maps);
-      } else {
-        reject(new Error('Google Maps loaded, but maps API is unavailable'));
-      }
-    };
-    script.onerror = () => reject(new Error('Failed to load Google Maps script'));
-    document.head.appendChild(script);
-  });
-}
+const OSM_TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
 
 export default function GMap({ apiBase }) {
   const [warehouses, setWarehouses] = useState([]);
@@ -88,24 +58,7 @@ export default function GMap({ apiBase }) {
   }, [apiBase]);
 
   useEffect(() => {
-    let cancelled = false;
-
-    loadGoogleMapsScript()
-      .then(() => {
-        if (!cancelled) {
-          setMapReady(true);
-        }
-      })
-      .catch((err) => {
-        console.error('Error loading Google Maps:', err);
-        if (!cancelled) {
-          setError(err.message || 'Unable to load Google Maps');
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
+    setMapReady(true);
   }, []);
 
   const orderLocations = useMemo(() => {
@@ -156,89 +109,44 @@ export default function GMap({ apiBase }) {
   const selectedLocation = selectedOptions.find((item) => item.id === selectedId) || null;
 
   useEffect(() => {
-    if (!mapReady || !mapElementRef.current || !window.google?.maps) {
+    if (!mapReady || !mapElementRef.current) {
       return;
     }
 
-    // Clear existing markers
-    markersRef.current.forEach((marker) => marker.setMap(null));
+    markersRef.current.forEach((marker) => marker.remove());
     markersRef.current = [];
 
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.remove();
+      mapInstanceRef.current = null;
+    }
+
+    const centerLat = selectedLocation?.location?.lat ?? warehouses[0]?.location?.lat ?? 12.9716;
+    const centerLon = selectedLocation?.location?.lon ?? warehouses[0]?.location?.lon ?? 77.5946;
+
+    mapInstanceRef.current = L.map(mapElementRef.current).setView([centerLat, centerLon], 9);
+    L.tileLayer(OSM_TILE_URL, {
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(mapInstanceRef.current);
+
     if (selectedType === 'warehouse' && warehouses.length > 0) {
-      // Show all warehouse markers
-      const bounds = new window.google.maps.LatLngBounds();
-      
+      const bounds = [];
+
       warehouses.forEach((warehouse) => {
-        const position = {
-          lat: warehouse.location.lat,
-          lng: warehouse.location.lon
-        };
-
-        const marker = new window.google.maps.Marker({
-          position,
-          map: mapInstanceRef.current,
-          title: warehouse.name,
-          label: warehouse.name.charAt(0).toUpperCase()
-        });
-
-        const infoWindow = new window.google.maps.InfoWindow({
-          content: `<div style="padding: 8px;">
-            <strong>${warehouse.name}</strong><br/>
-            Capacity: ${warehouse.capacity}<br/>
-            Stock: ${Object.values(warehouse.currentStock).reduce((a, b) => a + b, 0)}
-          </div>`
-        });
-
-        marker.addListener('click', () => {
-          infoWindow.open(mapInstanceRef.current, marker);
-        });
-
+        const marker = L.marker([warehouse.location.lat, warehouse.location.lon]).addTo(mapInstanceRef.current);
+        marker.bindPopup(`<strong>${warehouse.name}</strong><br/>Capacity: ${warehouse.capacity}<br/>Stock: ${Object.values(warehouse.currentStock || {}).reduce((a, b) => a + b, 0)}`);
         markersRef.current.push(marker);
-        bounds.extend(position);
+        bounds.push([warehouse.location.lat, warehouse.location.lon]);
       });
 
-      if (!mapInstanceRef.current) {
-        const center = {
-          lat: warehouses[0].location.lat,
-          lng: warehouses[0].location.lon
-        };
-        mapInstanceRef.current = new window.google.maps.Map(mapElementRef.current, {
-          center,
-          zoom: 12,
-          mapTypeControl: true,
-          streetViewControl: true,
-          fullscreenControl: true
-        });
+      if (bounds.length > 0) {
+        mapInstanceRef.current.fitBounds(bounds, { padding: [24, 24] });
       }
-
-      mapInstanceRef.current.fitBounds(bounds);
     } else if (selectedLocation?.location) {
-      // Show single marker for other types
-      const center = {
-        lat: selectedLocation.location.lat,
-        lng: selectedLocation.location.lon
-      };
-
-      if (!mapInstanceRef.current) {
-        mapInstanceRef.current = new window.google.maps.Map(mapElementRef.current, {
-          center,
-          zoom: 12,
-          mapTypeControl: true,
-          streetViewControl: true,
-          fullscreenControl: true
-        });
-      } else {
-        mapInstanceRef.current.setCenter(center);
-        mapInstanceRef.current.setZoom(12);
-      }
-
-      const marker = new window.google.maps.Marker({
-        position: center,
-        map: mapInstanceRef.current,
-        title: selectedLocation.name
-      });
-
+      const marker = L.marker([selectedLocation.location.lat, selectedLocation.location.lon]).addTo(mapInstanceRef.current);
+      marker.bindPopup(`<strong>${selectedLocation.name}</strong><br/>${selectedLocation.subtitle || ''}`);
       markersRef.current.push(marker);
+      mapInstanceRef.current.setView([selectedLocation.location.lat, selectedLocation.location.lon], 12);
     }
   }, [mapReady, selectedLocation, selectedType, warehouses]);
 
@@ -268,7 +176,7 @@ export default function GMap({ apiBase }) {
 
   return (
     <div className="panel">
-      <h2 style={{ marginBottom: '20px' }}>Google Map View</h2>
+      <h2 style={{ marginBottom: '20px' }}>Map View</h2>
 
       <div className="card">
         <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: '12px', alignItems: 'end' }}>
@@ -308,13 +216,11 @@ export default function GMap({ apiBase }) {
               <div style={{ textAlign: 'right' }}>
                 <a
                   className="btn btn-primary"
-                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                    `${selectedLocation.location.lat},${selectedLocation.location.lon}`
-                  )}`}
+                  href={`https://www.openstreetmap.org/?mlat=${selectedLocation.location.lat}&mlon=${selectedLocation.location.lon}#map=12/${selectedLocation.location.lat}/${selectedLocation.location.lon}`}
                   target="_blank"
                   rel="noreferrer"
                 >
-                  Open in Google Maps
+                  Open in OSM
                 </a>
               </div>
             </div>

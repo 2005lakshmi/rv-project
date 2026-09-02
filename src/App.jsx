@@ -11,6 +11,8 @@ import AIInsightsPanel from './components/AIInsightsPanel';
 import GMap from './components/gmap';
 import LoginPortal from './components/LoginPortal';
 import DriverWorkspace from './components/DriverWorkspace';
+import AdminLogin from './components/AdminLogin';
+import AdminDashboard from './components/AdminDashboard';
 
 const API_BASE = 'http://localhost:3000/api';
 
@@ -20,6 +22,12 @@ function App() {
 
   useEffect(() => {
     checkServer();
+    const savedToken = localStorage.getItem('admin_token');
+    const savedUser = localStorage.getItem('admin_user');
+
+    if (savedToken && savedUser) {
+      setSession({ role: 'admin' });
+    }
   }, []);
 
   const checkServer = async () => {
@@ -31,29 +39,48 @@ function App() {
     }
   };
 
+  const handleAdminLogout = () => {
+    localStorage.removeItem('admin_token');
+    localStorage.removeItem('admin_user');
+    setSession(null);
+  };
+
   const tabs = [
-    { id: 'dashboard', label: 'Dashboard', icon: 'Dashboard' },
-    { id: 'warehouses', label: 'Warehouses', icon: 'Warehouses' },
-    { id: 'orders', label: 'Orders', icon: 'Orders' },
-    { id: 'forecast', label: 'Forecast', icon: 'Forecast' },
-    { id: 'kpis', label: 'KPIs', icon: 'KPIs' },
-    { id: 'ai', label: 'AI Insights', icon: 'AI' },
-    { id: 'map', label: 'Map', icon: 'Map' },
-    { id: 'disruption', label: 'Disruptions', icon: 'Disruptions' },
-    { id: 'alerts', label: 'Alerts', icon: 'Alerts' }
+    { id: 'dashboard', label: 'Home', icon: '' },
+    { id: 'warehouses', label: 'Whs', icon: '' },
+    { id: 'orders', label: 'Orders', icon: '' },
+    { id: 'forecast', label: 'Forecast', icon: '' },
+    { id: 'kpis', label: 'KPIs', icon: '' },
+    { id: 'ai', label: 'AI', icon: '' },
+    { id: 'map', label: 'Map', icon: '' },
+    { id: 'disruption', label: 'Risk', icon: '' },
+    { id: 'alerts', label: 'Alerts', icon: '' }
   ];
 
   if (!session) {
     return (
       <LoginPortal
-        onAdminLogin={() => setSession({ role: 'admin' })}
+        onAdminLogin={() => setSession({ role: 'admin-login' })}
         onDriverLogin={(driver) => setSession({ role: 'driver', driver })}
       />
     );
   }
 
+  if (session.role === 'admin-login') {
+    return <AdminLogin onAuthSuccess={() => setSession({ role: 'admin' })} />;
+  }
+
   if (session.role === 'driver') {
     return <DriverWorkspace apiBase={API_BASE} driver={session.driver} onLogout={() => setSession(null)} />;
+  }
+
+  if (session.role === 'admin') {
+    return (
+      <AdminDashboard
+        onLogout={handleAdminLogout}
+        onOpenLogistics={() => setSession({ role: 'logistics' })}
+      />
+    );
   }
 
   return (
@@ -66,7 +93,7 @@ function App() {
         <div className="header-status">
           <span className="status-indicator online"></span>
           <p>Admin Online</p>
-          <button className="btn btn-secondary" onClick={() => setSession(null)}>
+          <button className="btn btn-secondary" onClick={handleAdminLogout}>
             Logout
           </button>
         </div>

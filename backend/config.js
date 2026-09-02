@@ -6,12 +6,14 @@ const config = {
   // API Keys
   apis: {
     gemini: process.env.GEMINI_API_KEY || '',
-    geminiModel: process.env.GEMINI_MODEL || 'gemini-1.5-flash'
+    geminiModel: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
+    googleMaps: process.env.GOOGLE_MAPS_API_KEY || ''
   },
 
   // Server configuration
   port: process.env.PORT || 3000,
   env: process.env.NODE_ENV || 'development',
+  useMockData: ['1', 'true', 'yes'].includes(String(process.env.USE_MOCK_DATA || '').toLowerCase()),
 
   // System parameters
   system: {
